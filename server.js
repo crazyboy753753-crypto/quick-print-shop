@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createEngine } = require('./lib/engine');
+const webpush = require('web-push');
+const { GoogleAuth } = require('google-auth-library');
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -13,6 +15,41 @@ const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const FILES_INDEX = path.join(DATA_DIR, 'files.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const PUSH_FILE = path.join(DATA_DIR, 'push.json');
+const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
+
+function loadJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; }
+}
+function saveJson(file, value) {
+  fs.writeFileSync(file, JSON.stringify(value));
+}
+
+let vapid = loadJson(VAPID_FILE, null);
+if (!vapid) {
+  vapid = webpush.generateVAPIDKeys();
+  saveJson(VAPID_FILE, vapid);
+}
+webpush.setVapidDetails('mailto:shop@quickprint.local', vapid.publicKey, vapid.privateKey);
+
+function sendPush(title, body) {
+  const subs = loadJson(PUSH_FILE, []);
+  if (!subs.length) return;
+  const payload = JSON.stringify({ title, body, url: '/' });
+  const keep = [];
+  subs.forEach((sub) => {
+    webpush.sendNotification(sub, payload).catch((err) => {
+      if (err && (err.statusCode === 404 || err.statusCode === 410)) return; // dead subscription
+      keep.push(sub);
+    });
+  });
+  // keep only the ones that did not fail permanently
+  setTimeout(() => {
+    const alive = subs.filter((sub) => keep.length === 0 || keep.indexOf(sub) >= 0);
+    saveJson(PUSH_FILE, alive.length ? alive : subs);
+  }, 1500);
+}
 const engine = createEngine(DATA_DIR);
 
 const app = express();
@@ -214,6 +251,8 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
     const order = created.body.order;
     const lines = items.map((i) => i.name + (i.pages ? ' (' + i.pages + ' x ' + i.copies + ')' : '')).join(', ');
     notifyPhone('New order ' + order.id, (order.customer.name || 'Customer') + ' - Rs ' + order.total + '\n' + lines);
+    sendPush('New order - ' + (order.customer.name || 'Customer'), 'Rs ' + order.total + ' - ' + order.id);
+    sendFcm('New order - ' + (order.customer.name || 'Customer'), 'Rs ' + order.total + ' - ' + order.id);
 
     res.status(201).json({ ok: true, orderId: order.id, total: order.total });
   } catch (err) {
@@ -244,6 +283,27 @@ function notifyPhone(title, message, priority) {
     body: message,
   }).then(() => true).catch(() => false);
 }
+
+
+/* a small feed the phone app can poll in the background */
+app.get('/api/feed', (req, res) => {
+  const key = String(req.query.key || '');
+  const since = String(req.query.since || '');
+  const db = readDbFile();
+  const topic = (db.settings && db.settings.notifyTopic) || process.env.NTFY_TOPIC || '';
+  if (!topic || key !== topic) return res.status(403).json({ error: 'Not allowed' });
+
+  const orders = (engine.call('GET', '/api/owner/orders', { status: 'all' }, {}).body || {}).orders || [];
+  const fresh = orders.filter((o) => !since || o.createdAt > since).map((o) => ({
+    id: o.id,
+    name: (o.customer && o.customer.name) || 'Customer',
+    phone: (o.customer && o.customer.phone) || '',
+    total: o.total,
+    at: o.createdAt,
+    status: o.status,
+  }));
+  res.json({ orders: fresh.slice(0, 10), latest: orders.length ? orders[0].createdAt : since });
+});
 
 /* customer order tracking — needs the order id plus the mobile number */
 app.get('/api/track/:id', (req, res) => {
@@ -296,9 +356,67 @@ app.get('/api/track/:id', (req, res) => {
 });
 
 /* everything else: the shop's own engine */
+const FCM_FILE = path.join(DATA_DIR, 'fcm.json');
+const FCM_PROJECT = process.env.FCM_PROJECT_ID || '';
+let fcmAuth = null;
+function fcmClient() {
+  if (fcmAuth) return fcmAuth;
+  const raw = process.env.FCM_SERVICE_ACCOUNT || '';
+  if (!raw) return null;
+  try {
+    const json = JSON.parse(raw.trim().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8'));
+    fcmAuth = new GoogleAuth({ credentials: json, scopes: ['https://www.googleapis.com/auth/firebase.messaging'] });
+    return fcmAuth;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function sendFcm(title, body) {
+  const auth = fcmClient();
+  const tokens = loadJson(FCM_FILE, []);
+  if (!auth || !FCM_PROJECT || !tokens.length) return false;
+  try {
+    const client = await auth.getClient();
+    const access = await client.getAccessToken();
+    await Promise.all(tokens.map((token) =>
+      fetch('https://fcm.googleapis.com/v1/projects/' + FCM_PROJECT + '/messages:send', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + access.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { token, notification: { title, body }, android: { priority: 'high' } } }),
+      }).catch(() => null)
+    ));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+app.post('/api/push/fcm', (req, res) => {
+  const token = String((req.body && req.body.token) || '');
+  if (!token) return res.status(400).json({ error: 'No token' });
+  const tokens = loadJson(FCM_FILE, []);
+  if (!tokens.includes(token)) tokens.push(token);
+  saveJson(FCM_FILE, tokens.slice(-20));
+  res.json({ ok: true });
+});
+
+app.get('/api/push/key', (req, res) => res.json({ key: vapid.publicKey }));
+
+app.post('/api/push/subscribe', requireOwner, (req, res) => {
+  const sub = req.body || {};
+  if (!sub.endpoint) return res.status(400).json({ error: 'Bad subscription' });
+  const subs = loadJson(PUSH_FILE, []);
+  if (!subs.some((x) => x.endpoint === sub.endpoint)) subs.push(sub);
+  saveJson(PUSH_FILE, subs);
+  res.json({ ok: true });
+});
+
 app.post('/api/owner/notify/test', requireOwner, async (req, res) => {
   const sent = await notifyPhone('Test notification', 'Aapke phone par notification kaam kar raha hai.');
-  res.json({ ok: sent, error: sent ? '' : 'Notification topic set nahi hai' });
+  sendPush('Test notification', 'Aapke phone par notification kaam kar raha hai.');
+  sendFcm('Test notification', 'Aapke phone par notification kaam kar raha hai.');
+  res.json({ ok: true, error: '' });
 });
 
 app.all('/api/*', (req, res) => {

@@ -246,7 +246,7 @@ function renderFiles() {
         if (pt.unit === 'pcs') {
           const per = Math.max(1, pt.pcsPerUnit || 1);
           return `<label class="field"><span class="lbl">How many pieces</span>
-            <input type="number" min="${per}" step="${per}" value="${item.pages}" data-field="pages" />
+            <input type="number" min="1" step="1" value="${item.pages}" data-field="pages" />
             <div class="muted" style="margin-top:4px">₹${(pt.pricePerPage / per).toFixed(2).replace(/\.00$/, '')} per piece · ₹${pt.pricePerPage} for ${per} pcs</div>
           </label>`;
         }

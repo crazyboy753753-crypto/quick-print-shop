@@ -1134,19 +1134,13 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
 
       <div class="card tight" id="notifyCard">
         <div class="card-head"><h2>Order notifications</h2></div>
-        <p class="small muted" style="margin-bottom:10px">Customer order bheje to aapke phone par notification aayegi — app band ho tab bhi.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn primary" id="notifyEnable">Turn on notifications</button>
+        <p class="small muted" style="margin-bottom:10px">Customer order bheje to phone par notification aayegi — site band ho tab bhi. Koi alag app nahi chahiye.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="pushEnable">Enable phone notifications</button>
           <button class="btn" id="notifyTest">Send test</button>
         </div>
-        <div id="notifySetup" class="hidden" style="margin-top:12px">
-          <div class="small" style="margin-bottom:6px">1. Play Store se <b>ntfy</b> app install karo (free)</div>
-          <div class="small" style="margin-bottom:6px">2. App me <b>Subscribe to topic</b> dabao aur ye topic daalo:</div>
-          <div class="notice info" style="word-break:break-all;font-weight:700" id="notifyTopic"></div>
-          <button class="btn small ghost" id="notifyCopy" style="margin-top:8px">Copy topic</button>
-          <div class="small muted" style="margin-top:8px">3. Ab har naye order par notification aayegi.</div>
-        </div>
-        <div class="small muted" id="notifyState" style="margin-top:8px"></div>
+        <div class="small muted" id="notifyState" style="margin-top:10px"></div>
+        <div class="small muted" id="notifyHelp" style="margin-top:6px"></div>
       </div>
 
       <div class="card tight" id="qrCard">
@@ -4877,16 +4871,19 @@ function openPriceList() {
     } else {
       const pt = c2.printTypes.find((x) => x.id === id);
       if (pt) {
+        const byPieces = pt.unit === 'pcs';
+        const lot = byPieces ? Math.max(1, pt.pcsPerUnit || 1) : 1;
+        const lineAmount = byPieces ? lot * (pt.pricePerPage / lot) : pt.pricePerPage;
         S.cart.push({
           kind: 'print',
           printTypeId: pt.id,
           name: pt.name,
-          pages: 1,
+          pages: lot,
           copies: 1,
-          qty: 1,
-          unit: 'page',
-          rate: pt.pricePerPage,
-          amount: Math.round(pt.pricePerPage * 100) / 100,
+          qty: lot,
+          unit: byPieces ? 'pcs' : 'page',
+          rate: byPieces ? Math.round((pt.pricePerPage / lot) * 100) / 100 : pt.pricePerPage,
+          amount: Math.round(lineAmount * 100) / 100,
           stockId: pt.stockId,
           consume: pt.sheetsPerPage,
         });
@@ -6273,51 +6270,73 @@ if (upiQrClear) {
   });
 }
 
-/* order notifications on the phone (ntfy) */
+/* phone notifications (web push — works with the site closed) */
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
 function renderNotifyCard() {
-  const s = (S.data && S.data.settings) || {};
   if (window.QPS_OFFLINE) {
     const card = $('#notifyCard');
     if (card) card.classList.add('hidden');
     return;
   }
-  const topic = s.notifyTopic || '';
-  const setup = $('#notifySetup');
   const state = $('#notifyState');
-  const btn = $('#notifyEnable');
-  if (topic) {
-    if (setup) setup.classList.remove('hidden');
-    $('#notifyTopic').textContent = topic;
-    if (state) state.textContent = 'Notifications are on for this phone.';
-    if (btn) btn.textContent = 'New topic';
+  const help = $('#notifyHelp');
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window;
+  if (!supported) {
+    if (state) state.textContent = 'Is browser me notification support nahi hai.';
+    if (help) help.textContent = 'Chrome me site kholo, wahan se Enable dabao.';
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg) return;
+      reg.pushManager.getSubscription().then((sub) => {
+        if (state) state.textContent = sub ? 'Notifications are ON for this phone.' : 'Notifications are allowed — press Enable once.';
+      });
+    });
+  } else if (Notification.permission === 'denied') {
+    if (state) state.textContent = 'Notifications blocked hain.';
+    if (help) help.textContent = 'Browser ki site settings me notifications allow karo.';
   } else {
-    if (setup) setup.classList.add('hidden');
-    if (state) state.textContent = 'Notifications are off. Turn them on to get an alert for every order.';
-    if (btn) btn.textContent = 'Turn on notifications';
+    if (state) state.textContent = 'Notifications are off.';
+    if (help) help.textContent = 'Enable dabao aur Allow karo — phir order aane par phone bajega.';
   }
 }
 
-const notifyEnable = $('#notifyEnable');
-if (notifyEnable) {
-  notifyEnable.addEventListener('click', async () => {
-    const random = Math.random().toString(36).slice(2, 8);
-    const topic = 'quickprint-' + random + '-' + Date.now().toString(36).slice(-4);
+const pushEnable = $('#pushEnable');
+if (pushEnable) {
+  pushEnable.addEventListener('click', async () => {
     try {
-      await api('/api/owner/settings', { method: 'PUT', body: JSON.stringify({ notifyTopic: topic }) });
-      await refreshAll();
-      toast('Notifications on — ntfy app me topic subscribe karo');
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        toast('Is browser me support nahi — Chrome me kholo', true);
+        return;
+      }
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast('Notification permission chahiye', true);
+        renderNotifyCard();
+        return;
+      }
+      const keyRes = await fetch('/api/push/key');
+      const keyData = await keyRes.json();
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyData.key),
+      });
+      await api('/api/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+      toast('Notifications on');
+      renderNotifyCard();
     } catch (ex) {
-      toast(ex.message, true);
+      toast(ex.message || 'Notifications on nahi ho payi', true);
     }
-  });
-}
-
-const notifyCopy = $('#notifyCopy');
-if (notifyCopy) {
-  notifyCopy.addEventListener('click', () => {
-    const text = $('#notifyTopic').textContent || '';
-    if (copyToClipboard(text)) toast('Topic copied');
-    else toast('Copy nahi ho paya', true);
   });
 }
 
@@ -6325,8 +6344,8 @@ const notifyTest = $('#notifyTest');
 if (notifyTest) {
   notifyTest.addEventListener('click', async () => {
     try {
-      const out = await api('/api/owner/notify/test', { method: 'POST' });
-      toast(out.ok ? 'Test notification bhej di' : (out.error || 'Topic set nahi hai'), !out.ok);
+      await api('/api/owner/notify/test', { method: 'POST' });
+      toast('Test notification bhej di');
     } catch (ex) {
       toast(ex.message, true);
     }
