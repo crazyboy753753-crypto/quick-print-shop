@@ -241,10 +241,20 @@ function renderFiles() {
           ${state.cfg.printTypes.map((p) => `<option value="${p.id}" ${p.id === item.printTypeId ? 'selected' : ''}>${p.name} — ${rateLabel(p)}</option>`).join('')}
         </select>
       </label>
-      <div class="grid">
-        <label class="field"><span class="lbl">${(state.cfg.printTypes.find((p) => p.id === item.printTypeId) || {}).unit === 'pcs' ? 'Pieces' : 'Pages'}</span><input type="number" min="1" step="1" value="${item.pages}" data-field="pages" /></label>
-        <label class="field"><span class="lbl">Copies</span><input type="number" min="1" step="1" value="${item.copies}" data-field="copies" /></label>
-      </div>
+      ${(() => {
+        const pt = state.cfg.printTypes.find((p) => p.id === item.printTypeId) || {};
+        if (pt.unit === 'pcs') {
+          const per = Math.max(1, pt.pcsPerUnit || 1);
+          return `<label class="field"><span class="lbl">How many pieces</span>
+            <input type="number" min="${per}" step="${per}" value="${item.pages}" data-field="pages" />
+            <div class="muted" style="margin-top:4px">₹${(pt.pricePerPage / per).toFixed(2).replace(/\.00$/, '')} per piece · ₹${pt.pricePerPage} for ${per} pcs</div>
+          </label>`;
+        }
+        return `<div class="grid">
+          <label class="field"><span class="lbl">Pages</span><input type="number" min="1" step="1" value="${item.pages}" data-field="pages" /></label>
+          <label class="field"><span class="lbl">Copies</span><input type="number" min="1" step="1" value="${item.copies}" data-field="copies" /></label>
+        </div>`;
+      })()}
     </div>`).join('');
   renderTotal();
 }
@@ -261,7 +271,14 @@ $('#fileList').addEventListener('change', (e) => {
   if (!row) return;
   const idx = Number(row.dataset.idx);
   const field = e.target.dataset.field;
-  if (field === 'printTypeId') state.items[idx].printTypeId = e.target.value;
+  if (field === 'printTypeId') {
+    state.items[idx].printTypeId = e.target.value;
+    const pt = state.cfg.printTypes.find((p) => p.id === e.target.value) || {};
+    state.items[idx].copies = 1;
+    state.items[idx].pages = pt.unit === 'pcs' ? Math.max(1, pt.pcsPerUnit || 1) : 1;
+    renderFiles();
+    return;
+  }
   if (field === 'pages') state.items[idx].pages = Math.max(1, Number(e.target.value) || 1);
   if (field === 'copies') state.items[idx].copies = Math.max(1, Number(e.target.value) || 1);
   renderTotal();
@@ -274,7 +291,7 @@ $('#files').addEventListener('change', (e) => {
     state.items.push({
       file,
       printTypeId: firstType ? firstType.id : '',
-      pages: 1,
+      pages: firstType && firstType.unit === 'pcs' ? Math.max(1, firstType.pcsPerUnit || 1) : 1,
       copies: 1,
     });
   });

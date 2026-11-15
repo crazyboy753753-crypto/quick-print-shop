@@ -157,7 +157,7 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
       const lamination = laminations.find((l) => l.id === raw.laminationId) || { name: '', price: 0 };
       const soldByPieces = pt.unit === 'pcs';
       const piecesPerRate = Math.max(1, pt.pcsPerUnit || 1);
-      const qty = pages * copies;
+      const qty = soldByPieces ? pages : pages * copies;
       const printAmount = soldByPieces ? qty * (pt.pricePerPage / piecesPerRate) : qty * pt.pricePerPage;
       const amount = printAmount + (binding.price || 0) * copies + (lamination.price || 0) * copies;
 
@@ -210,13 +210,40 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
     }
 
     writeIndex(index);
-    res.status(201).json({ ok: true, orderId: created.body.order.id, total: created.body.order.total });
+
+    const order = created.body.order;
+    const lines = items.map((i) => i.name + (i.pages ? ' (' + i.pages + ' x ' + i.copies + ')' : '')).join(', ');
+    notifyPhone('New order ' + order.id, (order.customer.name || 'Customer') + ' - Rs ' + order.total + '\n' + lines);
+
+    res.status(201).json({ ok: true, orderId: order.id, total: order.total });
   } catch (err) {
     cleanup();
     res.status(400).json({ error: err.message || 'Could not place the order' });
   }
 });
 
+
+
+/* ------------------------------------------------------------------ alerts */
+
+function readDbFile() {
+  try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'db.json'), 'utf8')); } catch (e) { return {}; }
+}
+
+function notifyPhone(title, message, priority) {
+  const db = readDbFile();
+  const topic = (db.settings && db.settings.notifyTopic) || process.env.NTFY_TOPIC || '';
+  if (!topic) return Promise.resolve(false);
+  return fetch('https://ntfy.sh/' + encodeURIComponent(topic), {
+    method: 'POST',
+    headers: {
+      Title: title.replace(/[^\x20-\x7E]/g, ''),
+      Priority: priority || 'high',
+      Tags: 'printer',
+    },
+    body: message,
+  }).then(() => true).catch(() => false);
+}
 
 /* customer order tracking — needs the order id plus the mobile number */
 app.get('/api/track/:id', (req, res) => {
@@ -269,6 +296,11 @@ app.get('/api/track/:id', (req, res) => {
 });
 
 /* everything else: the shop's own engine */
+app.post('/api/owner/notify/test', requireOwner, async (req, res) => {
+  const sent = await notifyPhone('Test notification', 'Aapke phone par notification kaam kar raha hai.');
+  res.json({ ok: sent, error: sent ? '' : 'Notification topic set nahi hai' });
+});
+
 app.all('/api/*', (req, res) => {
   const isOwnerApi = req.path.startsWith('/api/owner/');
   if (isOwnerApi && !isSignedIn(req)) return res.status(401).json({ error: 'Signed out' });

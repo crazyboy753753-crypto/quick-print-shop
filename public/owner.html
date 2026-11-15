@@ -1132,6 +1132,23 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
         <p>Shop details, PIN, backup and the customer QR.</p>
       </div>
 
+      <div class="card tight" id="notifyCard">
+        <div class="card-head"><h2>Order notifications</h2></div>
+        <p class="small muted" style="margin-bottom:10px">Customer order bheje to aapke phone par notification aayegi — app band ho tab bhi.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary" id="notifyEnable">Turn on notifications</button>
+          <button class="btn" id="notifyTest">Send test</button>
+        </div>
+        <div id="notifySetup" class="hidden" style="margin-top:12px">
+          <div class="small" style="margin-bottom:6px">1. Play Store se <b>ntfy</b> app install karo (free)</div>
+          <div class="small" style="margin-bottom:6px">2. App me <b>Subscribe to topic</b> dabao aur ye topic daalo:</div>
+          <div class="notice info" style="word-break:break-all;font-weight:700" id="notifyTopic"></div>
+          <button class="btn small ghost" id="notifyCopy" style="margin-top:8px">Copy topic</button>
+          <div class="small muted" style="margin-top:8px">3. Ab har naye order par notification aayegi.</div>
+        </div>
+        <div class="small muted" id="notifyState" style="margin-top:8px"></div>
+      </div>
+
       <div class="card tight" id="qrCard">
         <div class="card-head"><h2>Customer QR</h2></div>
         <p class="small muted" style="margin-bottom:10px">Print this and put it at the counter — customers scan it to send their files.</p>
@@ -4442,7 +4459,7 @@ function switchTab(tab) {
   if (tab === 'billing') setTimeout(() => $('#scan').focus(), 60);
   // these screens read fresh numbers every time they open
   if (tab === 'udhar' || tab === 'stock' || tab === 'profile') refreshAll();
-  if (tab === 'settings') setTimeout(renderShopQr, 80);
+  if (tab === 'settings') setTimeout(() => { renderShopQr(); renderNotifyCard(); }, 80);
 }
 
 /* ================================================================ counter */
@@ -6253,6 +6270,66 @@ if (upiQrClear) {
     if (preview) { preview.removeAttribute('src'); preview.style.display = 'none'; }
     if (upiQrFile) upiQrFile.value = '';
     toast('QR removed — press Save settings');
+  });
+}
+
+/* order notifications on the phone (ntfy) */
+function renderNotifyCard() {
+  const s = (S.data && S.data.settings) || {};
+  if (window.QPS_OFFLINE) {
+    const card = $('#notifyCard');
+    if (card) card.classList.add('hidden');
+    return;
+  }
+  const topic = s.notifyTopic || '';
+  const setup = $('#notifySetup');
+  const state = $('#notifyState');
+  const btn = $('#notifyEnable');
+  if (topic) {
+    if (setup) setup.classList.remove('hidden');
+    $('#notifyTopic').textContent = topic;
+    if (state) state.textContent = 'Notifications are on for this phone.';
+    if (btn) btn.textContent = 'New topic';
+  } else {
+    if (setup) setup.classList.add('hidden');
+    if (state) state.textContent = 'Notifications are off. Turn them on to get an alert for every order.';
+    if (btn) btn.textContent = 'Turn on notifications';
+  }
+}
+
+const notifyEnable = $('#notifyEnable');
+if (notifyEnable) {
+  notifyEnable.addEventListener('click', async () => {
+    const random = Math.random().toString(36).slice(2, 8);
+    const topic = 'quickprint-' + random + '-' + Date.now().toString(36).slice(-4);
+    try {
+      await api('/api/owner/settings', { method: 'PUT', body: JSON.stringify({ notifyTopic: topic }) });
+      await refreshAll();
+      toast('Notifications on — ntfy app me topic subscribe karo');
+    } catch (ex) {
+      toast(ex.message, true);
+    }
+  });
+}
+
+const notifyCopy = $('#notifyCopy');
+if (notifyCopy) {
+  notifyCopy.addEventListener('click', () => {
+    const text = $('#notifyTopic').textContent || '';
+    if (copyToClipboard(text)) toast('Topic copied');
+    else toast('Copy nahi ho paya', true);
+  });
+}
+
+const notifyTest = $('#notifyTest');
+if (notifyTest) {
+  notifyTest.addEventListener('click', async () => {
+    try {
+      const out = await api('/api/owner/notify/test', { method: 'POST' });
+      toast(out.ok ? 'Test notification bhej di' : (out.error || 'Topic set nahi hai'), !out.ok);
+    } catch (ex) {
+      toast(ex.message, true);
+    }
   });
 }
 
