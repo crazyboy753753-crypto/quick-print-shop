@@ -1,0 +1,22 @@
+# Render blueprint for Quick Print Shop
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: quick-print-shop
+    runtime: node
+    plan: starter          # free plan works, but without a disk data is lost on restart
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: 20.20.2
+      - key: OWNER_PIN
+        generateValue: false
+        value: "1234"        # change this to your own PIN after the first deploy
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: quick-print-data
+      mountPath: /var/data
+      sizeGB: 1

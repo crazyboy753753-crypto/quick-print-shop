@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Quick Print Shop — send a print order</title>
+<meta name="theme-color" content="#3f3ee8" />
+<style>
+  :root {
+    --brand: #3f3ee8; --brand-soft: #eeedff; --ink: #14161c; --ink-2: #4a5162;
+    --ink-3: #7c8598; --line: #e3e7ef; --bg: #f5f6fa; --ok: #0f8a52; --danger: #c62f3d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; padding-bottom: 120px;
+  }
+  header {
+    background: linear-gradient(150deg, #3532cf, #4b40e4 55%, #7a58ef);
+    color: #fff; padding: 22px 18px 26px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .mark {
+    width: 42px; height: 42px; border-radius: 13px; background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.35); display: grid; place-items: center;
+    font-weight: 800; font-size: 15px; letter-spacing: -.5px;
+  }
+  h1 { font-size: 19px; margin: 0; letter-spacing: -.3px; }
+  .tag { font-size: 12.5px; color: rgba(255,255,255,.85); margin-top: 2px; }
+  .meta { margin-top: 14px; font-size: 12.5px; color: rgba(255,255,255,.9); line-height: 1.5; }
+  main { max-width: 620px; margin: 0 auto; padding: 14px; }
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px; margin-bottom: 14px;
+  }
+  h2 { font-size: 14px; margin: 0 0 12px; letter-spacing: -.2px; }
+  .field { display: block; margin-bottom: 12px; }
+  .lbl { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; font-weight: 600; }
+  input[type=text], input[type=tel], input[type=number], select, textarea {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px;
+    font: inherit; font-size: 14px; background: #fbfcff; color: var(--ink);
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+  .drop {
+    display: block;
+    border: 1.5px dashed #c9cfe0; border-radius: 14px; padding: 22px 14px; text-align: center;
+    background: #fbfcff; cursor: pointer;
+  }
+  .drop strong { display: block; font-size: 14px; margin-bottom: 4px; }
+  .drop span { font-size: 12px; color: var(--ink-3); }
+  .file {
+    border: 1px solid var(--line); border-radius: 13px; padding: 12px; margin-top: 10px; background: #fff;
+  }
+  .file-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .file-name { font-size: 13.5px; font-weight: 650; flex: 1; word-break: break-all; }
+  .x {
+    border: 0; background: #fdecee; color: var(--danger); width: 28px; height: 28px;
+    border-radius: 9px; font-size: 15px; cursor: pointer; flex: none;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.97);
+    border-top: 1px solid var(--line); padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    backdrop-filter: blur(12px);
+  }
+  .bar-in { max-width: 620px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .total { font-size: 17px; font-weight: 800; }
+  .total small { display: block; font-size: 11px; color: var(--ink-3); font-weight: 600; }
+  button.send {
+    margin-left: auto; background: var(--brand); color: #fff; border: 0; border-radius: 12px;
+    padding: 13px 20px; font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
+  }
+  button.send:disabled { opacity: .55; }
+  .muted { color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+  .err { background: #fdecee; color: #8c1f2b; padding: 10px 12px; border-radius: 10px; font-size: 13px; margin-bottom: 12px; }
+  .ok-card { text-align: center; padding: 26px 18px; }
+  .tick {
+    width: 62px; height: 62px; border-radius: 50%; background: #e6f6ee; color: var(--ok);
+    display: grid; place-items: center; font-size: 30px; margin: 0 auto 14px;
+  }
+  .order-id { font-size: 20px; font-weight: 800; letter-spacing: -.4px; margin: 6px 0; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="mark" id="mark">QP</div>
+    <div>
+      <h1 id="shopName">Quick Print Shop</h1>
+      <div class="tag" id="tagline">Print smarter. Collect faster.</div>
+    </div>
+  </div>
+  <div class="meta" id="shopMeta"></div>
+</header>
+
+<main>
+  <div class="err hidden" id="errorBox"></div>
+
+  <div id="formView">
+    <div class="card">
+      <h2>1. Your files</h2>
+      <label class="drop" for="files">
+        <strong>Tap to choose files</strong>
+        <span>PDF, photo, Word, Excel — up to 20 files, 25 MB each</span>
+      </label>
+      <input type="file" id="files" multiple class="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt" />
+      <div id="fileList"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Your details</h2>
+      <label class="field"><span class="lbl">Name</span><input type="text" id="name" placeholder="Your name" autocomplete="name" /></label>
+      <label class="field"><span class="lbl">Mobile number</span><input type="tel" id="phone" placeholder="10 digit mobile" inputmode="numeric" autocomplete="tel" /></label>
+      <label class="field"><span class="lbl">Anything to note (optional)</span><input type="text" id="note" placeholder="e.g. print only page 2, staple it" /></label>
+    </div>
+  </div>
+
+  <div id="doneView" class="card ok-card hidden">
+    <div class="tick">✓</div>
+    <h2 style="font-size:16px">Order sent to the shop</h2>
+    <div class="order-id" id="doneId"></div>
+    <p class="muted" id="doneText">Your files have reached the shop. Please collect and pay at the counter.</p>
+    <button class="send" id="againBtn" style="margin:16px auto 0">Send another order</button>
+  </div>
+</main>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="total"><small>Estimated total</small><span id="total">₹0</span></div>
+    <button class="send" id="sendBtn">Send order</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const $ = (s) => document.querySelector(s);
+const money = (n) => '₹' + new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n || 0);
+
+const state = { cfg: null, items: [] };
+
+function showError(msg) {
+  const box = $('#errorBox');
+  box.textContent = msg;
+  box.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function priceItem(item) {
+  const pt = state.cfg.printTypes.find((p) => p.id === item.printTypeId);
+  if (!pt) return 0;
+  return (Math.max(1, item.pages) * Math.max(1, item.copies)) * pt.pricePerPage;
+}
+
+function renderTotal() {
+  let total = state.items.reduce((sum, i) => sum + priceItem(i), 0);
+  const cfg = state.cfg || {};
+  if (cfg.enforceMinOrder && total > 0 && total < (cfg.minOrder || 0)) total = cfg.minOrder;
+  $('#total').textContent = money(total);
+}
+
+function renderFiles() {
+  const box = $('#fileList');
+  box.innerHTML = state.items.map((item, idx) => `
+    <div class="file" data-idx="${idx}">
+      <div class="file-head">
+        <span class="file-name">${item.file.name}</span>
+        <button class="x" data-remove="${idx}" type="button">×</button>
+      </div>
+      <label class="field"><span class="lbl">Print type</span>
+        <select data-field="printTypeId">
+          ${state.cfg.printTypes.map((p) => `<option value="${p.id}" ${p.id === item.printTypeId ? 'selected' : ''}>${p.name} — ₹${p.pricePerPage}/page</option>`).join('')}
+        </select>
+      </label>
+      <div class="grid">
+        <label class="field"><span class="lbl">Pages</span><input type="number" min="1" step="1" value="${item.pages}" data-field="pages" /></label>
+        <label class="field"><span class="lbl">Copies</span><input type="number" min="1" step="1" value="${item.copies}" data-field="copies" /></label>
+      </div>
+    </div>`).join('');
+  renderTotal();
+}
+
+$('#fileList').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  state.items.splice(Number(btn.dataset.remove), 1);
+  renderFiles();
+});
+
+$('#fileList').addEventListener('change', (e) => {
+  const row = e.target.closest('[data-idx]');
+  if (!row) return;
+  const idx = Number(row.dataset.idx);
+  const field = e.target.dataset.field;
+  if (field === 'printTypeId') state.items[idx].printTypeId = e.target.value;
+  if (field === 'pages') state.items[idx].pages = Math.max(1, Number(e.target.value) || 1);
+  if (field === 'copies') state.items[idx].copies = Math.max(1, Number(e.target.value) || 1);
+  renderTotal();
+});
+
+$('#files').addEventListener('change', (e) => {
+  const picked = Array.from(e.target.files || []);
+  const firstType = state.cfg.printTypes[0];
+  picked.forEach((file) => {
+    state.items.push({
+      file,
+      printTypeId: firstType ? firstType.id : '',
+      pages: 1,
+      copies: 1,
+    });
+  });
+  e.target.value = '';
+  renderFiles();
+});
+
+$('#sendBtn').addEventListener('click', async () => {
+  const name = $('#name').value.trim();
+  const phone = $('#phone').value.replace(/\D/g, '');
+  if (!state.items.length) return showError('Please choose at least one file to print.');
+  if (!name) return showError('Please enter your name.');
+  if (phone.length < 10) return showError('Please enter a valid 10 digit mobile number.');
+
+  const btn = $('#sendBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  $('#errorBox').classList.add('hidden');
+
+  try {
+    const form = new FormData();
+    state.items.forEach((item) => form.append('files', item.file, item.file.name));
+    form.append('payload', JSON.stringify({
+      name,
+      phone,
+      note: $('#note').value.trim(),
+      items: state.items.map((i) => ({
+        printTypeId: i.printTypeId,
+        pages: i.pages,
+        copies: i.copies,
+      })),
+    }));
+
+    const res = await fetch('/api/orders', { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not send the order');
+
+    $('#doneId').textContent = data.orderId;
+    $('#doneText').textContent = 'Total ₹' + data.total + '. Your files have reached the shop — please collect and pay at the counter.';
+    $('#formView').classList.add('hidden');
+    $('#doneView').classList.remove('hidden');
+    document.querySelector('.bar').classList.add('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send order';
+  }
+});
+
+$('#againBtn').addEventListener('click', () => location.reload());
+
+(async function boot() {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    state.cfg = cfg;
+
+    $('#shopName').textContent = cfg.shopName || 'Quick Print Shop';
+    $('#tagline').textContent = cfg.tagline || '';
+    $('#mark').textContent = (cfg.shopName || 'QP').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+    document.title = (cfg.shopName || 'Quick Print Shop') + ' — send a print order';
+
+    const bits = [];
+    if (cfg.address) bits.push(cfg.address);
+    if (cfg.phone) bits.push('Ph: ' + cfg.phone);
+    if (cfg.openNote) bits.push(cfg.openNote);
+    $('#shopMeta').textContent = bits.join(' · ');
+
+    if (!cfg.printTypes || !cfg.printTypes.length) {
+      showError('The shop has not set its print rates yet. Please order at the counter.');
+      $('#sendBtn').disabled = true;
+      return;
+    }
+    if (cfg.acceptOrders === false) {
+      showError('The shop is not taking online orders right now. Please come to the counter.');
+      $('#sendBtn').disabled = true;
+    }
+    renderTotal();
+  } catch (err) {
+    showError('Could not reach the shop. Check your internet and try again.');
+  }
+})();
+</script>
+</body>
+</html>
