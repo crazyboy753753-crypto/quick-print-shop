@@ -155,7 +155,11 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
       const copies = Math.max(1, Math.round(Number(raw.copies) || 1));
       const binding = bindings.find((b) => b.id === raw.bindingId) || { name: '', price: 0 };
       const lamination = laminations.find((l) => l.id === raw.laminationId) || { name: '', price: 0 };
-      const amount = pages * copies * pt.pricePerPage + (binding.price || 0) * copies + (lamination.price || 0) * copies;
+      const soldByPieces = pt.unit === 'pcs';
+      const piecesPerRate = Math.max(1, pt.pcsPerUnit || 1);
+      const qty = pages * copies;
+      const printAmount = soldByPieces ? qty * (pt.pricePerPage / piecesPerRate) : qty * pt.pricePerPage;
+      const amount = printAmount + (binding.price || 0) * copies + (lamination.price || 0) * copies;
 
       let fileId = null;
       if (file) {
@@ -175,9 +179,9 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
         printTypeId: pt.id,
         pages,
         copies,
-        qty: pages * copies,
-        unit: 'page',
-        rate: pt.pricePerPage,
+        qty,
+        unit: soldByPieces ? 'pcs' : 'page',
+        rate: soldByPieces ? Math.round((pt.pricePerPage / piecesPerRate) * 100) / 100 : pt.pricePerPage,
         amount: Math.round(amount * 100) / 100,
         bindingName: binding.name,
         laminationName: lamination.name,
@@ -233,7 +237,16 @@ app.get('/api/track/:id', (req, res) => {
     }
   }
 
+  const cfg = engine.call('GET', '/api/config', {}, {}).body || {};
+  const unpaid = ['ready', 'delivered'].indexOf(order.status) >= 0 && !order.paid;
+
   res.json({
+    payment: {
+      due: unpaid ? order.total : 0,
+      paid: Boolean(order.paid),
+      upiId: cfg.upiId || '',
+      upiQr: cfg.upiQr || '',
+    },
     order: {
       id: order.id,
       status: order.status,

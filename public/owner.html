@@ -1151,6 +1151,17 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
         <div class="grid-2">
           <label class="field"><span class="lbl">Phone / WhatsApp</span><input type="tel" id="setPhone" placeholder="9876543210" /></label>
           <label class="field"><span class="lbl">UPI ID (optional)</span><input type="text" id="setUpi" placeholder="shop@upi" /></label>
+        <div class="field">
+          <span class="lbl">UPI QR image (optional)</span>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <img id="upiQrPreview" alt="" style="width:84px;height:84px;object-fit:contain;border:1px solid var(--line);border-radius:10px;background:#fff;display:none" />
+            <div style="flex:1;min-width:170px">
+              <input type="file" id="upiQrFile" accept="image/*" style="font-size:12.5px" />
+              <div class="small muted" style="margin-top:6px">Customer ko Ready hone par yahi QR dikhega (PhonePe/GPay ka QR).</div>
+              <button class="btn small ghost" id="upiQrClear" type="button" style="margin-top:6px">Remove QR</button>
+            </div>
+          </div>
+        </div>
         </div>
         <label class="field"><span class="lbl">Address</span><input type="text" id="setAddress" /></label>
         <div class="grid-2">
@@ -4028,6 +4039,7 @@ const S = {
   payment: 'cash',
   udharId: null,
   stockQuery: '',
+  upiQr: '',
   viewBill: null,
   viewBillHtml: '',
 };
@@ -5673,7 +5685,7 @@ function renderItems() {
       <tr data-kind="printTypes" data-id="${esc(p.id)}">
         <td>${esc(p.name)}${p.active ? '' : ' <span class="pill cancelled">hidden</span>'}</td>
         <td class="small muted">${p.colour === 'color' ? 'Colour' : p.colour === 'bw' ? 'B&W' : 'None'} · ${p.sides === 'double' ? 'double side' : p.sides === 'single' ? 'single side' : 'None'}${p.paper && p.paper !== 'none' ? ' · ' + (p.paper === 'Photo' ? 'Photo Paper' : 'A4 Paper') : ''}</td>
-        <td class="num nowrap">${money(p.pricePerPage)}</td>
+        <td class="num nowrap">${money(p.pricePerPage)}${p.unit === 'pcs' ? `<div class="small muted">/ ${p.pcsPerUnit || 1} pcs</div>` : '<div class="small muted">/ page</div>'}</td>
         <td class="small">${esc(stockName(p.stockId))} <span class="muted">(${p.sheetsPerPage}/page)</span></td>
         <td class="num nowrap"><button class="btn small ghost" data-act="edit">Edit</button><button class="btn small danger" data-act="delete">×</button></td>
       </tr>`).join('') || '<tr><td colspan="5" class="muted center">No print types yet</td></tr>',
@@ -5727,7 +5739,12 @@ const KIND_FIELDS = {
       { key: 'name', label: 'Name shown to customers', value: item ? item.name : '', placeholder: 'e.g. Mobile Colour Print' },
       { key: 'colour', label: 'Colour', type: 'select', value: item ? item.colour : 'bw', options: [{ value: 'none', label: 'None' }, { value: 'bw', label: 'Black & white' }, { value: 'color', label: 'Colour' }] },
       { key: 'sides', label: 'Sides', type: 'select', value: item ? item.sides : 'single', options: [{ value: 'none', label: 'None' }, { value: 'single', label: 'Single side' }, { value: 'double', label: 'Double side' }] },
-      { key: 'pricePerPage', label: 'Rate ₹ per page', type: 'number', value: item ? item.pricePerPage : 2, step: '0.5' },
+      { key: 'unit', label: 'Sell by', type: 'select', value: item && item.unit ? item.unit : 'page', options: [
+        { value: 'page', label: 'Per page' },
+        { value: 'pcs', label: 'Per pieces (pcs)' },
+      ] },
+      { key: 'pricePerPage', label: 'Rate ₹ (for one page / one lot)', type: 'number', value: item ? item.pricePerPage : 2, step: '0.5' },
+      { key: 'pcsPerUnit', label: 'How many pcs in that rate', type: 'number', value: item && item.pcsPerUnit ? item.pcsPerUnit : 1, min: 1, step: '1', hint: 'Only for “Per pieces”. Example: ₹30 for 5 passport photos → rate 30, pcs 5.' },
       { key: 'paper', label: 'Paper', type: 'select', value: item && item.paper ? item.paper : 'A4', options: [
         { value: 'none', label: 'None' },
         { value: 'A4', label: 'A4 Paper' },
@@ -6184,6 +6201,59 @@ function fillSettings() {
   $('#setAccept').value = String(Boolean(s.acceptOrders));
   $('#setMin').value = String(Boolean(s.enforceMinOrder));
   $('#setMinAmount').value = s.minOrder ?? 0;
+  S.upiQr = s.upiQr || '';
+  const preview = $('#upiQrPreview');
+  if (preview) {
+    if (S.upiQr) { preview.src = S.upiQr; preview.style.display = 'block'; }
+    else { preview.removeAttribute('src'); preview.style.display = 'none'; }
+  }
+}
+
+/* UPI QR image for the customer's payment page */
+function shrinkImage(file, maxSize, done) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      done(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => done('');
+    img.src = reader.result;
+  };
+  reader.onerror = () => done('');
+  reader.readAsDataURL(file);
+}
+
+const upiQrFile = $('#upiQrFile');
+if (upiQrFile) {
+  upiQrFile.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    shrinkImage(file, 420, (dataUrl) => {
+      if (!dataUrl) { toast('Could not read that image', true); return; }
+      S.upiQr = dataUrl;
+      const preview = $('#upiQrPreview');
+      preview.src = dataUrl;
+      preview.style.display = 'block';
+      toast('QR added — press Save settings');
+    });
+  });
+}
+
+const upiQrClear = $('#upiQrClear');
+if (upiQrClear) {
+  upiQrClear.addEventListener('click', () => {
+    S.upiQr = '';
+    const preview = $('#upiQrPreview');
+    if (preview) { preview.removeAttribute('src'); preview.style.display = 'none'; }
+    if (upiQrFile) upiQrFile.value = '';
+    toast('QR removed — press Save settings');
+  });
 }
 
 /* customer QR: the same link the shop is opened on */
@@ -6256,6 +6326,7 @@ $('#saveSettings').addEventListener('click', async () => {
     acceptOrders: $('#setAccept').value === 'true',
     enforceMinOrder: $('#setMin').value === 'true',
     minOrder: num($('#setMinAmount').value, 0),
+    upiQr: S.upiQr || '',
   };
   if (!body.shopName) { toast('Shop name cannot be empty', true); return; }
   try {

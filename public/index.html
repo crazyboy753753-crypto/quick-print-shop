@@ -103,6 +103,13 @@
   .bill-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
   .bill-row:last-child { border-bottom: 0; font-weight: 800; font-size: 15px; }
   .track-line { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.5; }
+  .pay-card { margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #fbfcff; }
+  .pay-card.paid { background: #e6f6ee; border-color: #b7e6cd; color: #0b5f3a; font-weight: 700; text-align: center; }
+  .pay-head { font-size: 16px; font-weight: 800; margin-bottom: 8px; }
+  .pay-opt { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; margin-top: 6px; }
+  .pay-qr { margin: 10px 0 6px; text-align: center; }
+  .pay-qr img { width: 190px; height: 190px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 8px; }
+  .pay-upi { font-size: 12.5px; margin-top: 4px; }
   .pill-status {
     display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
     background: #eeedff; color: var(--brand); margin-bottom: 8px;
@@ -169,6 +176,7 @@
 
     <div id="trackItems"></div>
     <div id="trackBill"></div>
+    <div id="payBox"></div>
     <p class="track-line" id="trackNote"></p>
 
     <button class="send" id="againBtn" style="width:100%;margin-top:14px">Send another order</button>
@@ -200,7 +208,17 @@ function showError(msg) {
 function priceItem(item) {
   const pt = state.cfg.printTypes.find((p) => p.id === item.printTypeId);
   if (!pt) return 0;
-  return (Math.max(1, item.pages) * Math.max(1, item.copies)) * pt.pricePerPage;
+  const qty = Math.max(1, item.pages) * Math.max(1, item.copies);
+  if (pt.unit === 'pcs') return qty * (pt.pricePerPage / Math.max(1, pt.pcsPerUnit || 1));
+  return qty * pt.pricePerPage;
+}
+
+function rateLabel(pt) {
+  if (pt.unit === 'pcs') {
+    const per = Math.max(1, pt.pcsPerUnit || 1);
+    return '₹' + pt.pricePerPage + ' / ' + per + ' pcs';
+  }
+  return '₹' + pt.pricePerPage + '/page';
 }
 
 function renderTotal() {
@@ -220,11 +238,11 @@ function renderFiles() {
       </div>
       <label class="field"><span class="lbl">Print type</span>
         <select data-field="printTypeId">
-          ${state.cfg.printTypes.map((p) => `<option value="${p.id}" ${p.id === item.printTypeId ? 'selected' : ''}>${p.name} — ₹${p.pricePerPage}/page</option>`).join('')}
+          ${state.cfg.printTypes.map((p) => `<option value="${p.id}" ${p.id === item.printTypeId ? 'selected' : ''}>${p.name} — ${rateLabel(p)}</option>`).join('')}
         </select>
       </label>
       <div class="grid">
-        <label class="field"><span class="lbl">Pages</span><input type="number" min="1" step="1" value="${item.pages}" data-field="pages" /></label>
+        <label class="field"><span class="lbl">${(state.cfg.printTypes.find((p) => p.id === item.printTypeId) || {}).unit === 'pcs' ? 'Pieces' : 'Pages'}</span><input type="number" min="1" step="1" value="${item.pages}" data-field="pages" /></label>
         <label class="field"><span class="lbl">Copies</span><input type="number" min="1" step="1" value="${item.copies}" data-field="copies" /></label>
       </div>
     </div>`).join('');
@@ -345,6 +363,23 @@ function paintStatus(data) {
     cancelled: 'This order was cancelled by the shop. Please ask at the counter.',
   };
   $('#trackNote').textContent = notes[order.status] || '';
+
+  const pay = data.payment || {};
+  const box = $('#payBox');
+  if (pay.due > 0) {
+    const qr = pay.upiQr ? `<div class="pay-qr"><img src="${pay.upiQr}" alt="UPI QR" /></div>` : '';
+    const upi = pay.upiId ? `<div class="pay-upi">UPI ID: <b>${pay.upiId}</b></div>` : '';
+    box.innerHTML = `<div class="pay-card">
+      <div class="pay-head">Pay ₹${pay.due}</div>
+      <div class="pay-opt"><b>Online</b> — scan the QR below with any UPI app${qr}${upi}</div>
+      <div class="pay-opt"><b>Cash</b> — pay at the counter when you collect</div>
+      ${qr || upi ? '' : '<div class="muted" style="margin-top:6px">The shop has not added a UPI QR yet — please pay cash at the counter.</div>'}
+    </div>`;
+  } else if (pay.paid) {
+    box.innerHTML = '<div class="pay-card paid">Payment received — thank you!</div>';
+  } else {
+    box.innerHTML = '';
+  }
 }
 
 async function loadTrack(id, phone, silent) {
