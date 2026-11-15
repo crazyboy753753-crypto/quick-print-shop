@@ -54,6 +54,13 @@ After the first deploy you get a URL like `https://quick-print-shop.onrender.com
 | `/api/owner/*` | dashboard API (needs the PIN session) |
 | `/api/owner/files/:order/:file` | download an uploaded file |
 
+## Customer side
+
+* Customers send a file and immediately get a **live status page** (Received → Printing → Ready → Collected)
+  that refreshes by itself, plus the **bill number and total** once the shop marks the order ready.
+* They can come back later: order number + mobile number shows the same status.
+* The dashboard has a **Customer QR** card in Settings — print it and put it at the counter.
+
 ## Notes
 
 * Uploads: PDF, JPG, PNG, WEBP, Word, Excel, PowerPoint, TXT — 20 files, 25 MB each.

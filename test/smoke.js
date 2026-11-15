@@ -136,6 +136,24 @@ async function api(pathname, opts = {}) {
     if (!sunita || sunita.balance !== 30) throw new Error('udhar not recorded');
   });
 
+  await check('customer can track the order status and see the bill', async () => {
+    const orders = (await api('/api/owner/orders?status=all')).json.orders;
+    const order = orders[0];
+    const track = await fetch(base + '/api/track/' + order.id + '?phone=9812345678');
+    const data = await track.json();
+    if (track.status !== 200) throw new Error('track failed ' + track.status + ' ' + JSON.stringify(data));
+    if (data.order.status !== 'ready') throw new Error('wrong status: ' + data.order.status);
+    if (!data.bill || !data.bill.no) throw new Error('bill missing in tracking');
+    if (data.order.items.length < 1) throw new Error('items missing');
+  });
+
+  await check('tracking needs the right mobile number', async () => {
+    const orders = (await api('/api/owner/orders?status=all')).json.orders;
+    const order = orders[0];
+    const bad = await fetch(base + '/api/track/' + order.id + '?phone=9999999999');
+    if (bad.status !== 404) throw new Error('should be 404, got ' + bad.status);
+  });
+
   await check('logout clears the session', async () => {
     await api('/api/owner/logout', { method: 'POST' });
     const { res } = await api('/api/owner/bootstrap');

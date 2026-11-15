@@ -82,6 +82,31 @@
   }
   .order-id { font-size: 20px; font-weight: 800; letter-spacing: -.4px; margin: 6px 0; }
   .hidden { display: none !important; }
+
+  .stepper { display: flex; align-items: flex-start; gap: 4px; margin: 6px 0 16px; }
+  .step { flex: 1; text-align: center; position: relative; }
+  .step .dot {
+    width: 22px; height: 22px; border-radius: 50%; background: #e6e9f2; color: #9aa2b5;
+    display: grid; place-items: center; margin: 0 auto 6px; font-size: 11px; font-weight: 700;
+    border: 2px solid #e6e9f2;
+  }
+  .step b { font-size: 11px; font-weight: 650; color: #9aa2b5; display: block; }
+  .step.done .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .step.done b { color: var(--ink); }
+  .step.now .dot { background: #fff; border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 4px #eeedff; }
+  .step.now b { color: var(--brand); }
+  .step:not(:last-child)::after {
+    content: ''; position: absolute; top: 11px; left: 50%; width: 100%; height: 2px;
+    background: #e6e9f2; z-index: -1;
+  }
+  .step.done:not(:last-child)::after { background: var(--ok); }
+  .bill-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .bill-row:last-child { border-bottom: 0; font-weight: 800; font-size: 15px; }
+  .track-line { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.5; }
+  .pill-status {
+    display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+    background: #eeedff; color: var(--brand); margin-bottom: 8px;
+  }
 </style>
 </head>
 <body>
@@ -102,6 +127,14 @@
 
   <div id="formView">
     <div class="card">
+      <h2>Already sent an order?</h2>
+      <div class="grid-2">
+        <label class="field"><span class="lbl">Order number</span><input type="text" id="trackId" placeholder="ORD-20261115-001" /></label>
+        <label class="field"><span class="lbl">Mobile number</span><input type="tel" id="trackPhone" placeholder="10 digit mobile" inputmode="numeric" /></label>
+      </div>
+      <button class="send" id="trackBtn" style="width:100%">See my order status</button>
+    </div>
+    <div class="card">
       <h2>1. Your files</h2>
       <label class="drop" for="files">
         <strong>Tap to choose files</strong>
@@ -119,12 +152,26 @@
     </div>
   </div>
 
-  <div id="doneView" class="card ok-card hidden">
-    <div class="tick">✓</div>
-    <h2 style="font-size:16px">Order sent to the shop</h2>
-    <div class="order-id" id="doneId"></div>
-    <p class="muted" id="doneText">Your files have reached the shop. Please collect and pay at the counter.</p>
-    <button class="send" id="againBtn" style="margin:16px auto 0">Send another order</button>
+  <div id="doneView" class="card hidden">
+    <div style="text-align:center">
+      <div class="tick">✓</div>
+      <div class="pill-status" id="statusPill">Received</div>
+      <h2 style="font-size:16px">Order <span id="doneId"></span></h2>
+      <p class="muted" id="doneText" style="margin-top:4px">Keep this page open — it updates by itself.</p>
+    </div>
+
+    <div class="stepper" id="stepper">
+      <div class="step" data-step="pending"><span class="dot">1</span><b>Received</b></div>
+      <div class="step" data-step="printing"><span class="dot">2</span><b>Printing</b></div>
+      <div class="step" data-step="ready"><span class="dot">3</span><b>Ready</b></div>
+      <div class="step" data-step="delivered"><span class="dot">4</span><b>Collected</b></div>
+    </div>
+
+    <div id="trackItems"></div>
+    <div id="trackBill"></div>
+    <p class="track-line" id="trackNote"></p>
+
+    <button class="send" id="againBtn" style="width:100%;margin-top:14px">Send another order</button>
   </div>
 </main>
 
@@ -247,12 +294,7 @@ $('#sendBtn').addEventListener('click', async () => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Could not send the order');
 
-    $('#doneId').textContent = data.orderId;
-    $('#doneText').textContent = 'Total ₹' + data.total + '. Your files have reached the shop — please collect and pay at the counter.';
-    $('#formView').classList.add('hidden');
-    $('#doneView').classList.remove('hidden');
-    document.querySelector('.bar').classList.add('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    startTracking(data.orderId, phone);
   } catch (err) {
     showError(err.message);
   } finally {
@@ -262,6 +304,85 @@ $('#sendBtn').addEventListener('click', async () => {
 });
 
 $('#againBtn').addEventListener('click', () => location.reload());
+
+/* ---------------- order tracking ---------------- */
+
+const STEPS = ['pending', 'printing', 'ready', 'delivered'];
+let trackTimer = null;
+let trackOrderId = '';
+let trackPhone = '';
+
+function paintStatus(data) {
+  const order = data.order;
+  const label = (data.statusLabel && data.statusLabel[order.status]) || order.status;
+  $('#statusPill').textContent = label;
+  $('#doneId').textContent = order.id;
+
+  const current = STEPS.indexOf(order.status);
+  document.querySelectorAll('.step').forEach((el, i) => {
+    el.classList.toggle('done', current >= 0 && i <= current);
+    el.classList.toggle('now', current >= 0 && i === current);
+  });
+
+  const items = (order.items || []).map((i) => `
+    <div class="bill-row"><span>${i.name}</span><span>₹${i.amount}</span></div>`).join('');
+  $('#trackItems').innerHTML = items;
+
+  let billHtml = '';
+  if (data.bill) {
+    billHtml = `<div style="margin-top:12px">
+      <div class="bill-row"><span>Bill number</span><span>${data.bill.no}</span></div>
+      <div class="bill-row"><span>Total (${data.bill.payment.toUpperCase()})</span><span>₹${data.bill.total}</span></div>
+    </div>`;
+  }
+  $('#trackBill').innerHTML = billHtml;
+
+  const notes = {
+    pending: 'The shop has your files. Printing will start soon.',
+    printing: 'Your job is being printed right now.',
+    ready: 'Ready! Please collect it from the counter and pay.',
+    delivered: 'Collected — thank you!',
+    cancelled: 'This order was cancelled by the shop. Please ask at the counter.',
+  };
+  $('#trackNote').textContent = notes[order.status] || '';
+}
+
+async function loadTrack(id, phone, silent) {
+  try {
+    const res = await fetch('/api/track/' + encodeURIComponent(id) + '?phone=' + encodeURIComponent(phone));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Order not found');
+    paintStatus(data);
+    return true;
+  } catch (err) {
+    if (!silent) showError(err.message);
+    return false;
+  }
+}
+
+function startTracking(id, phone) {
+  trackOrderId = id;
+  trackPhone = phone;
+  $('#formView').classList.add('hidden');
+  $('#doneView').classList.remove('hidden');
+  document.querySelector('.bar').classList.add('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  loadTrack(id, phone, false);
+  if (trackTimer) clearInterval(trackTimer);
+  trackTimer = setInterval(() => loadTrack(trackOrderId, trackPhone, true), 15000);
+}
+
+$('#trackBtn').addEventListener('click', () => {
+  const id = $('#trackId').value.trim().toUpperCase();
+  const phone = $('#trackPhone').value.replace(/\D/g, '');
+  if (!id) return showError('Please enter your order number.');
+  if (phone.length < 10) return showError('Please enter the mobile number you ordered with.');
+  loadTrack(id, phone, false).then((ok) => {
+    if (ok) {
+      startTracking(id, phone);
+    }
+  });
+});
 
 (async function boot() {
   try {

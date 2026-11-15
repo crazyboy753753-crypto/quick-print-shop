@@ -213,6 +213,48 @@ app.post('/api/orders', upload.array('files', 20), (req, res) => {
   }
 });
 
+
+/* customer order tracking — needs the order id plus the mobile number */
+app.get('/api/track/:id', (req, res) => {
+  const id = String(req.params.id || '').trim().toUpperCase();
+  const phone = String(req.query.phone || '').replace(/\D/g, '');
+  if (!id || phone.length < 10) return res.status(400).json({ error: 'Order number and mobile number needed' });
+
+  const list = (engine.call('GET', '/api/owner/orders', { status: 'all', q: id }, {}).body || {}).orders || [];
+  const order = list.find((o) => o.id === id);
+  const samePhone = order && String((order.customer && order.customer.phone) || '').replace(/\D/g, '') === phone;
+  if (!order || !samePhone) return res.status(404).json({ error: 'No order found for that number and mobile' });
+
+  let bill = null;
+  if (order.billId) {
+    const found = engine.call('GET', '/api/owner/bills/' + order.billId, {}, {});
+    if (found.body && found.body.bill) {
+      bill = { no: found.body.bill.no, total: found.body.bill.total, payment: found.body.bill.payment, at: found.body.bill.at };
+    }
+  }
+
+  res.json({
+    order: {
+      id: order.id,
+      status: order.status,
+      total: order.total,
+      createdAt: order.createdAt,
+      pickup: order.customer && order.customer.pickup,
+      items: (order.items || []).map((i) => ({
+        name: i.name,
+        qty: i.qty,
+        unit: i.unit,
+        amount: i.amount,
+        printTypeName: i.printTypeName,
+        pages: i.pages,
+        copies: i.copies,
+      })),
+    },
+    bill,
+    statusLabel: { pending: 'Received', printing: 'Printing', ready: 'Ready to collect', delivered: 'Collected', cancelled: 'Cancelled' },
+  });
+});
+
 /* everything else: the shop's own engine */
 app.all('/api/*', (req, res) => {
   const isOwnerApi = req.path.startsWith('/api/owner/');
