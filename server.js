@@ -408,6 +408,17 @@ app.post('/api/push/fcm', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/db-status', (req, res) => {
+  const stats = engineLib.dbStats ? engineLib.dbStats() : { active: false };
+  res.json({
+    database: Boolean(process.env.DATABASE_URL),
+    connected: stats.active,
+    savedBytes: stats.bytes,
+    lastSavedAt: stats.lastSavedAt,
+    lastError: stats.lastError || '',
+  });
+});
+
 app.get('/api/push/key', (req, res) => res.json({ key: vapid.publicKey }));
 
 app.post('/api/push/subscribe', requireOwner, (req, res) => {
