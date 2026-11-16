@@ -51,9 +51,13 @@ function sendPush(title, body) {
     saveJson(PUSH_FILE, alive.length ? alive : subs);
   }, 1500);
 }
-if (process.env.DATABASE_URL) engineLib.startDatabase(process.env.DATABASE_URL);
+let engine = null;
 
-const engine = createEngine(DATA_DIR);
+/* the shop data must be loaded from the database before the shop starts */
+async function bootEngine() {
+  if (process.env.DATABASE_URL) await engineLib.startDatabase(process.env.DATABASE_URL);
+  engine = createEngine(DATA_DIR);
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -447,11 +451,15 @@ app.use((err, req, res, next) => {
   res.status(400).json({ error: err.message || 'Request failed' });
 });
 
-engineLib.ready().then((usedDb) => {
-  if (usedDb) console.log('Shop data is stored in the database (DATABASE_URL).');
-});
-
-app.listen(PORT, () => {
-  console.log('Quick Print Shop running on port ' + PORT);
-  console.log('Data folder: ' + DATA_DIR);
+bootEngine().then(() => {
+  if (process.env.DATABASE_URL && engineLib.ready) {
+    engineLib.ready().then((usedDb) => {
+      if (usedDb) console.log('Shop data is stored in the database (DATABASE_URL).');
+      else console.log('No database connection — shop data is kept in the file.');
+    });
+  }
+  app.listen(PORT, () => {
+    console.log('Quick Print Shop running on port ' + PORT);
+    console.log('Data folder: ' + DATA_DIR);
+  });
 });
