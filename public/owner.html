@@ -5053,7 +5053,7 @@ $('#saveBill').addEventListener('click', async () => {
   }
 
   const items = S.cart.map((l) => {
-    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: Math.max(1, Math.round(num(l.qty, 1))), copies: 1 };
+    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: Math.max(1, Math.round(num(l.qty, 1))), copies: 1, rate: num(l.rate, 0) };
     if (l.kind === 'product') return { kind: 'product', productId: l.productId, qty: l.qty, rate: l.rate };
     return { kind: 'custom', name: l.name, qty: l.qty, rate: l.rate, stockId: l.stockId, consume: l.consume };
   });
