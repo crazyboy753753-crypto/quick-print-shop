@@ -520,7 +520,7 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .bottomnav-inner { max-width: none; }
   .canvas-wrap { margin-top: 12px; background: #eef0f6; border-radius: 12px; padding: 10px; display: flex; justify-content: center; }
-  .canvas-wrap canvas { display: block; max-height: 260px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
+  .canvas-wrap canvas { display: block; max-height: 330px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
   .nav-item { font-size: 10px; }
 }
 
@@ -1094,6 +1094,7 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" id="ppBuild">Make sheet</button>
         <button class="btn primary" id="ppPrint">Print</button>
+        <button class="btn ghost" id="ppClear">Remove photo</button>
       </div>
       <div class="canvas-wrap"><canvas id="ppCanvas"></canvas></div>
     </div>
@@ -1108,6 +1109,7 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" id="adBuild">Make sheet</button>
         <button class="btn primary" id="adPrint">Print</button>
+        <button class="btn ghost" id="adClear">Remove photos</button>
       </div>
       <div class="canvas-wrap"><canvas id="adCanvas"></canvas></div>
     </div>
@@ -6744,42 +6746,47 @@ checkSession();
     }
     const avg = samples.reduce((a, c) => [a[0] + c[0], a[1] + c[1], a[2] + c[2]], [0, 0, 0]).map((v) => v / samples.length);
 
-    const tolerance = 78;
-    const close = (p) => {
-      const dr = px[p] - avg[0], dg = px[p + 1] - avg[1], db = px[p + 2] - avg[2];
-      return Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
+    const dist = (p, c) => {
+      const dr = px[p] - c[0], dg = px[p + 1] - c[1], db = px[p + 2] - c[2];
+      return Math.sqrt(dr * dr + dg * dg + db * db);
     };
 
-    // flood fill from every border pixel that looks like background
     const mask = new Uint8Array(w * h);
-    const queue = [];
-    const seed = (x, y) => {
-      const i = y * w + x;
-      if (mask[i]) return;
-      if (!close(i * 4)) return;
-      mask[i] = 1;
-      queue.push(i);
-    };
-    for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
-    for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
 
-    while (queue.length) {
-      const i = queue.pop();
-      const x = i % w, y = (i - x) / w;
-      if (x > 0) { const j = i - 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
-      if (x < w - 1) { const j = i + 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
-      if (y > 0) { const j = i - w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
-      if (y < h - 1) { const j = i + w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+    function fillFromBorder(tolerance) {
+      const close = (p) => dist(p, avg) < tolerance;
+      const queue = [];
+      const seed = (x, y) => {
+        const i = y * w + x;
+        if (mask[i] || !close(i * 4)) return;
+        mask[i] = 1;
+        queue.push(i);
+      };
+      for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+      for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
+      while (queue.length) {
+        const i = queue.pop();
+        const x = i % w, y = (i - x) / w;
+        if (x > 0) { const j = i - 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+        if (x < w - 1) { const j = i + 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+        if (y > 0) { const j = i - w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+        if (y < h - 1) { const j = i + w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+      }
     }
 
-    // one pixel of feather so no white rim is left behind
-    for (let pass = 0; pass < 2; pass++) {
+    // pass 1 is careful, pass 2 catches shadows and slightly darker corners
+    fillFromBorder(70);
+    fillFromBorder(105);
+    fillFromBorder(135);
+
+    // grow the mask a little so no pale rim stays around the person
+    for (let pass = 0; pass < 3; pass++) {
       for (let y = 1; y < h - 1; y++) {
         for (let x = 1; x < w - 1; x++) {
           const i = y * w + x;
           if (mask[i]) continue;
           if (mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w]) {
-            if (close(i * 4)) mask[i] = 1;
+            if (dist(i * 4, avg) < 150) mask[i] = 1;
           }
         }
       }
@@ -6827,8 +6834,8 @@ checkSession();
       return;
     }
     const prepared = paintBackground(state.ppImg, colour);
-    const gap = mm(3);
-    const perRow = Math.max(1, Math.floor((A4.w - mm(20) + gap) / (PASSPORT.w + gap)));
+    const gap = mm(5);
+    const perRow = Math.max(1, Math.floor((A4.w - mm(14) + gap) / (PASSPORT.w + gap)));
     let placed = 0;
     let row = 0;
     while (placed < count) {
@@ -6859,7 +6866,7 @@ checkSession();
       ctx.fillText('Choose the front and back images', mm(20), mm(30));
       return;
     }
-    const gap = mm(4);
+    const gap = mm(8);
     const totalW = AADHAAR.w * 2 + gap;
     const startX = Math.round((A4.w - totalW) / 2);
     for (let c = 0; c < copies; c++) {
@@ -6908,6 +6915,34 @@ checkSession();
   document.getElementById('adCount').addEventListener('change', buildAadhaar);
   document.getElementById('ppBuild').addEventListener('click', buildPassport);
   document.getElementById('adBuild').addEventListener('click', buildAadhaar);
+  document.getElementById('ppClear').addEventListener('click', () => {
+    state.ppImg = null;
+    state.ppUrl = '';
+    document.getElementById('ppFile').value = '';
+    const c = document.getElementById('ppCanvas');
+    c.width = 600; c.height = 300;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#9aa2b5'; ctx.font = '26px Arial';
+    ctx.fillText('Photo removed — choose a new photo', 20, 60);
+    if (window.toast) toast('Photo removed');
+  });
+
+  document.getElementById('adClear').addEventListener('click', () => {
+    state.adFront = null;
+    state.adBack = null;
+    state.adUrl = '';
+    document.getElementById('adFront').value = '';
+    document.getElementById('adBack').value = '';
+    const c = document.getElementById('adCanvas');
+    c.width = 600; c.height = 300;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#9aa2b5'; ctx.font = '26px Arial';
+    ctx.fillText('Photos removed — choose front and back', 20, 60);
+    if (window.toast) toast('Photos removed');
+  });
+
   document.getElementById('ppPrint').addEventListener('click', () => { buildPassport(); printSheet(state.ppUrl, 'Passport photo sheet ready'); });
   document.getElementById('adPrint').addEventListener('click', () => { buildAadhaar(); printSheet(state.adUrl, 'Aadhaar sheet ready'); });
 
