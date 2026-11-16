@@ -5053,7 +5053,7 @@ $('#saveBill').addEventListener('click', async () => {
   }
 
   const items = S.cart.map((l) => {
-    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: l.pages, copies: l.copies };
+    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: Math.max(1, Math.round(num(l.qty, 1))), copies: 1 };
     if (l.kind === 'product') return { kind: 'product', productId: l.productId, qty: l.qty, rate: l.rate };
     return { kind: 'custom', name: l.name, qty: l.qty, rate: l.rate, stockId: l.stockId, consume: l.consume };
   });
@@ -5089,6 +5089,18 @@ $('#saveBill').addEventListener('click', async () => {
     toast(ex.message, true);
   } finally {
     btn.disabled = S.cart.length === 0;
+  }
+});
+
+/* picking a customer from the list brings their mobile number along */
+document.addEventListener('input', (e) => {
+  if (!e.target || e.target.id !== 'billName') return;
+  const name = e.target.value.trim().toLowerCase();
+  if (!name) return;
+  const found = (S.data.customers || []).find((c) => String(c.name || '').toLowerCase() === name);
+  const phoneBox = $('#billPhone');
+  if (found && phoneBox && !phoneBox.value.trim()) {
+    phoneBox.value = found.phone || '';
   }
 });
 
