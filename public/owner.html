@@ -4495,7 +4495,7 @@ function switchTab(tab) {
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === navTab));
   const gear = $('#settingsBtn');
   if (gear) gear.classList.toggle('active', tab === 'settings');
-  ['orders', 'counter', 'billing', 'bills', 'billview', 'stock', 'items', 'udhar', 'profile', 'settings'].forEach((t) => {
+  ['orders', 'counter', 'billing', 'bills', 'billview', 'stock', 'items', 'udhar', 'profile', 'settings', 'format'].forEach((t) => {
     const el = $('#tab-' + t);
     if (el) el.classList.toggle('hidden', t !== tab);
   });
