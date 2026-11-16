@@ -5,7 +5,8 @@ const multer = require('multer');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { createEngine } = require('./lib/engine');
+const engineLib = require('./lib/engine');
+const { createEngine } = engineLib;
 const webpush = require('web-push');
 const { GoogleAuth } = require('google-auth-library');
 
@@ -50,6 +51,8 @@ function sendPush(title, body) {
     saveJson(PUSH_FILE, alive.length ? alive : subs);
   }, 1500);
 }
+if (process.env.DATABASE_URL) engineLib.startDatabase(process.env.DATABASE_URL);
+
 const engine = createEngine(DATA_DIR);
 
 const app = express();
@@ -442,6 +445,10 @@ app.all('/api/*', (req, res) => {
 
 app.use((err, req, res, next) => {
   res.status(400).json({ error: err.message || 'Request failed' });
+});
+
+engineLib.ready().then((usedDb) => {
+  if (usedDb) console.log('Shop data is stored in the database (DATABASE_URL).');
 });
 
 app.listen(PORT, () => {
