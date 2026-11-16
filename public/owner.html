@@ -509,7 +509,6 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
 .nav-item.active svg { stroke-width: 2.1; }
 .nav-item:active { opacity: .7; }
 
-/* screens sit inside the shell */
 .canvas-wrap { margin-top: 12px; background: #eef0f6; border-radius: 12px; padding: 10px; display: flex; justify-content: center; }
 .canvas-wrap canvas { display: block; max-height: 320px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
 
@@ -5107,7 +5106,7 @@ $('#saveBill').addEventListener('click', async () => {
   }
 
   const items = S.cart.map((l) => {
-    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: Math.max(1, Math.round(num(l.qty, 1))), copies: 1, rate: num(l.rate, 0) };
+    if (l.kind === 'print') return { kind: 'print', printTypeId: l.printTypeId, pages: Math.max(1, Math.round(num(l.qty, 1))), copies: 1 };
     if (l.kind === 'product') return { kind: 'product', productId: l.productId, qty: l.qty, rate: l.rate };
     return { kind: 'custom', name: l.name, qty: l.qty, rate: l.rate, stockId: l.stockId, consume: l.consume };
   });
@@ -6696,7 +6695,6 @@ checkSession();
 </script>
 
 <script>window.QPS_OFFLINE = false;</script>
-
 <script>
 /* ============================================================ print format */
 
@@ -6717,6 +6715,78 @@ checkSession();
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
+  }
+
+  /* AI cutout: needs internet, keeps hair and edges clean */
+  let segLoading = null;
+  function loadSegmentation() {
+    if (window.SelfieSegmentation) return Promise.resolve(true);
+    if (segLoading) return segLoading;
+    segLoading = new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+      script.crossOrigin = 'anonymous';
+      script.onload = () => resolve(Boolean(window.SelfieSegmentation));
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+      setTimeout(() => resolve(Boolean(window.SelfieSegmentation)), 12000);
+    });
+    return segLoading;
+  }
+
+  function colourOf(colour) {
+    return colour === 'blue' ? [74, 144, 226] : colour === 'grey' ? [232, 236, 242] : [255, 255, 255];
+  }
+
+  async function aiCutout(img, colour) {
+    const ok = await loadSegmentation();
+    if (!ok || !window.SelfieSegmentation) return null;
+    try {
+      const maxSide = 1000;
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+
+      const source = document.createElement('canvas');
+      source.width = w;
+      source.height = h;
+      source.getContext('2d').drawImage(img, 0, 0, w, h);
+
+      const seg = new window.SelfieSegmentation({
+        locateFile: (file) => 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/' + file,
+      });
+      seg.setOptions({ modelSelection: 1 });
+
+      const target = colourOf(colour);
+      const out = document.createElement('canvas');
+      out.width = w;
+      out.height = h;
+
+      const done = new Promise((resolve) => {
+        seg.onResults((res) => {
+          const ctx = out.getContext('2d');
+          ctx.fillStyle = 'rgb(' + target[0] + ',' + target[1] + ',' + target[2] + ')';
+          ctx.fillRect(0, 0, w, h);
+
+          const person = document.createElement('canvas');
+          person.width = w;
+          person.height = h;
+          const pctx = person.getContext('2d');
+          pctx.drawImage(res.image, 0, 0, w, h);
+          pctx.globalCompositeOperation = 'destination-in';
+          pctx.drawImage(res.segmentationMask, 0, 0, w, h);
+
+          ctx.drawImage(person, 0, 0);
+          resolve(true);
+        });
+      });
+
+      await seg.send({ image: source });
+      const result = await Promise.race([done, new Promise((r) => setTimeout(() => r(false), 15000))]);
+      return result ? out : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   /* replace the background behind the person with a solid colour */
@@ -6819,7 +6889,7 @@ checkSession();
     ctx.strokeRect(box.x, box.y, box.w, box.h);
   }
 
-  function buildPassport() {
+  async function buildPassport() {
     const count = Math.max(1, Math.min(40, Number(document.getElementById('ppCount').value) || 5));
     const colour = document.getElementById('ppBg').value;
     const canvas = document.getElementById('ppCanvas');
@@ -6834,7 +6904,9 @@ checkSession();
       ctx.fillText('Choose a photo first', mm(20), mm(30));
       return;
     }
-    const prepared = paintBackground(state.ppImg, colour);
+    let prepared = null;
+    if (colour !== 'none') prepared = await aiCutout(state.ppImg, colour);
+    if (!prepared) prepared = paintBackground(state.ppImg, colour);
     const gap = mm(5);
     const perRow = Math.max(1, Math.floor((A4.w - mm(14) + gap) / (PASSPORT.w + gap)));
     let placed = 0;
@@ -6853,7 +6925,7 @@ checkSession();
     state.ppUrl = canvas.toDataURL('image/jpeg', 0.92);
   }
 
-  function buildAadhaar() {
+  async function buildAadhaar() {
     const copies = Math.max(1, Math.min(4, Number(document.getElementById('adCount').value) || 1));
     const canvas = document.getElementById('adCanvas');
     canvas.width = A4.w;
@@ -6944,8 +7016,8 @@ checkSession();
     if (window.toast) toast('Photos removed');
   });
 
-  document.getElementById('ppPrint').addEventListener('click', () => { buildPassport(); printSheet(state.ppUrl, 'Passport photo sheet ready'); });
-  document.getElementById('adPrint').addEventListener('click', () => { buildAadhaar(); printSheet(state.adUrl, 'Aadhaar sheet ready'); });
+  document.getElementById('ppPrint').addEventListener('click', async () => { await buildPassport(); printSheet(state.ppUrl, 'Passport photo sheet ready'); });
+  document.getElementById('adPrint').addEventListener('click', async () => { await buildAadhaar(); printSheet(state.adUrl, 'Aadhaar sheet ready'); });
 
   window.__buildPassport = buildPassport;
   window.__buildAadhaar = buildAadhaar;
