@@ -510,6 +510,10 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
 .nav-item:active { opacity: .7; }
 
 /* screens sit inside the shell */
+.canvas-wrap { margin-top: 12px; background: #eef0f6; border-radius: 12px; padding: 10px; display: flex; justify-content: center; }
+.canvas-wrap canvas { display: block; max-height: 320px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
+
+/* screens sit inside the shell */
 .app-main .card { margin-top: 0; margin-bottom: 12px; }
 .app-main .pos-grid { margin-top: 0; }
 .app-main .toolbar { margin-top: 0; }
@@ -519,8 +523,6 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
   .screen-head h1 { font-size: 19px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .bottomnav-inner { max-width: none; }
-  .canvas-wrap { margin-top: 12px; background: #eef0f6; border-radius: 12px; padding: 10px; display: flex; justify-content: center; }
-  .canvas-wrap canvas { display: block; max-height: 330px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
   .nav-item { font-size: 10px; }
 }
 
@@ -6774,19 +6776,18 @@ checkSession();
       }
     }
 
-    // pass 1 is careful, pass 2 catches shadows and slightly darker corners
-    fillFromBorder(70);
-    fillFromBorder(105);
-    fillFromBorder(135);
+    // careful: only pixels that really look like the background, reached from the border
+    fillFromBorder(58);
+    fillFromBorder(78);
 
-    // grow the mask a little so no pale rim stays around the person
-    for (let pass = 0; pass < 3; pass++) {
+    // one gentle pass to remove the thin pale rim around hair and shoulders
+    for (let pass = 0; pass < 1; pass++) {
       for (let y = 1; y < h - 1; y++) {
         for (let x = 1; x < w - 1; x++) {
           const i = y * w + x;
           if (mask[i]) continue;
           if (mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w]) {
-            if (dist(i * 4, avg) < 150) mask[i] = 1;
+            if (dist(i * 4, avg) < 92) mask[i] = 1;
           }
         }
       }
