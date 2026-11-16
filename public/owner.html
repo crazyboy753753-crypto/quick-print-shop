@@ -519,6 +519,8 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
   .screen-head h1 { font-size: 19px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .bottomnav-inner { max-width: none; }
+  .canvas-wrap { margin-top: 12px; overflow: auto; background: #eef0f6; border-radius: 12px; padding: 8px; }
+  .canvas-wrap canvas { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; }
   .nav-item { font-size: 10px; }
 }
 
@@ -1069,7 +1071,49 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
     </section>
 
     <!-- ========================================================= udhar -->
-    <section id="tab-udhar" class="screen hidden">
+    <section id="tab-format" class="screen hidden">
+    <div class="screen-head">
+      <h1>Print format</h1>
+      <p>Passport photos and Aadhaar cards, ready to print on A4.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Passport size photo</h2></div>
+      <label class="field"><span class="lbl">Photo</span><input type="file" id="ppFile" accept="image/*" /></label>
+      <div class="grid-2">
+        <label class="field"><span class="lbl">How many pieces</span><input type="number" id="ppCount" value="5" min="1" max="40" /></label>
+        <label class="field"><span class="lbl">Background</span>
+          <select id="ppBg">
+            <option value="none">Keep original</option>
+            <option value="white">White</option>
+            <option value="blue">Blue</option>
+            <option value="grey">Light grey</option>
+          </select>
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="ppBuild">Make sheet</button>
+        <button class="btn primary" id="ppPrint">Print</button>
+      </div>
+      <div class="canvas-wrap"><canvas id="ppCanvas"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Aadhaar card (front &amp; back)</h2></div>
+      <div class="grid-2">
+        <label class="field"><span class="lbl">Front side</span><input type="file" id="adFront" accept="image/*" /></label>
+        <label class="field"><span class="lbl">Back side</span><input type="file" id="adBack" accept="image/*" /></label>
+      </div>
+      <label class="field"><span class="lbl">Copies</span><input type="number" id="adCount" value="1" min="1" max="4" /></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="adBuild">Make sheet</button>
+        <button class="btn primary" id="adPrint">Print</button>
+      </div>
+      <div class="canvas-wrap"><canvas id="adCanvas"></canvas></div>
+    </div>
+  </section>
+
+  <section id="tab-udhar" class="screen hidden">
       <div class="screen-head with-action">
         <div>
           <h1>Udhar</h1>
@@ -1259,6 +1303,12 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
           <path d="M20.6 13.4L13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V5a2 2 0 0 1 2-2h7a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z" /><circle cx="8" cy="8" r="1.4" />
         </svg>
         <span>Rates</span>
+      </button>
+      <button class="nav-item" data-tab="format">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M5 18l5-5 4 4 2-2 3 3" />
+        </svg>
+        <span>Format</span>
       </button>
       <button class="nav-item" data-tab="udhar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -6642,5 +6692,193 @@ checkSession();
 </script>
 
 <script>window.QPS_OFFLINE = false;</script>
+
+<script>
+/* ============================================================ print format */
+
+(function () {
+  const DPI = 300;
+  const mm = (v) => Math.round((v / 25.4) * DPI);      // millimetres -> pixels
+  const A4 = { w: mm(210), h: mm(297) };
+  const PASSPORT = { w: mm(35), h: mm(45) };
+  const AADHAAR = { w: mm(85.6), h: mm(54) };
+
+  const state = { ppImg: null, adFront: null, adBack: null, ppUrl: '', adUrl: '' };
+
+  function loadImage(file, done) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => done(img);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /* replace the plain background behind the person with a solid colour */
+  function paintBackground(img, colour) {
+    const maxSide = 1000;
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    if (colour === 'none') return canvas;
+
+    const data = ctx.getImageData(0, 0, w, h);
+    const px = data.data;
+    const target = colour === 'blue' ? [66, 133, 244] : colour === 'grey' ? [226, 230, 236] : [255, 255, 255];
+    const tolerance = 60;
+
+    const seen = new Uint8Array(w * h);
+    const queue = [];
+    const push = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const i = y * w + x;
+      if (seen[i]) return;
+      seen[i] = 1;
+      queue.push(i);
+    };
+    push(0, 0); push(w - 1, 0); push(0, h - 1); push(w - 1, h - 1);
+
+    while (queue.length) {
+      const i = queue.pop();
+      const p = i * 4;
+      const r = px[p], g = px[p + 1], b = px[p + 2];
+      const isBackground = r > 255 - tolerance && g > 255 - tolerance && b > 255 - tolerance;
+      if (!isBackground) continue;
+      px[p] = target[0]; px[p + 1] = target[1]; px[p + 2] = target[2]; px[p + 3] = 255;
+      const x = i % w, y = Math.floor(i / w);
+      push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
+    }
+    ctx.putImageData(data, 0, 0);
+    return canvas;
+  }
+
+  function drawCover(ctx, source, box) {
+    const sw = source.width || source.naturalWidth;
+    const sh = source.height || source.naturalHeight;
+    const scale = Math.max(box.w / sw, box.h / sh);
+    const dw = sw * scale;
+    const dh = sh * scale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.w, box.h);
+    ctx.clip();
+    ctx.drawImage(source, box.x + (box.w - dw) / 2, box.y + (box.h - dh) / 2, dw, dh);
+    ctx.restore();
+    ctx.strokeStyle = '#c9ced9';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(box.x, box.y, box.w, box.h);
+  }
+
+  function buildPassport() {
+    const count = Math.max(1, Math.min(40, Number(document.getElementById('ppCount').value) || 5));
+    const colour = document.getElementById('ppBg').value;
+    const canvas = document.getElementById('ppCanvas');
+    canvas.width = A4.w;
+    canvas.height = A4.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, A4.w, A4.h);
+    if (!state.ppImg) {
+      ctx.fillStyle = '#9aa2b5';
+      ctx.font = '40px Arial';
+      ctx.fillText('Choose a photo first', mm(20), mm(30));
+      return;
+    }
+    const prepared = paintBackground(state.ppImg, colour);
+    const gap = mm(3);
+    const perRow = Math.max(1, Math.floor((A4.w - mm(20) + gap) / (PASSPORT.w + gap)));
+    let placed = 0;
+    let row = 0;
+    while (placed < count) {
+      const inRow = Math.min(perRow, count - placed);
+      const rowWidth = inRow * PASSPORT.w + (inRow - 1) * gap;
+      const startX = Math.round((A4.w - rowWidth) / 2);
+      const y = mm(15) + row * (PASSPORT.h + gap);
+      for (let i = 0; i < inRow; i++) {
+        drawCover(ctx, prepared, { x: startX + i * (PASSPORT.w + gap), y, w: PASSPORT.w, h: PASSPORT.h });
+      }
+      placed += inRow;
+      row++;
+    }
+    state.ppUrl = canvas.toDataURL('image/jpeg', 0.92);
+  }
+
+  function buildAadhaar() {
+    const copies = Math.max(1, Math.min(4, Number(document.getElementById('adCount').value) || 1));
+    const canvas = document.getElementById('adCanvas');
+    canvas.width = A4.w;
+    canvas.height = A4.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, A4.w, A4.h);
+    if (!state.adFront && !state.adBack) {
+      ctx.fillStyle = '#9aa2b5';
+      ctx.font = '40px Arial';
+      ctx.fillText('Choose the front and back images', mm(20), mm(30));
+      return;
+    }
+    const gap = mm(4);
+    const totalW = AADHAAR.w * 2 + gap;
+    const startX = Math.round((A4.w - totalW) / 2);
+    for (let c = 0; c < copies; c++) {
+      const y = mm(15) + c * (AADHAAR.h + mm(6));
+      if (state.adFront) drawCover(ctx, state.adFront, { x: startX, y, w: AADHAAR.w, h: AADHAAR.h });
+      if (state.adBack) drawCover(ctx, state.adBack, { x: startX + AADHAAR.w + gap, y, w: AADHAAR.w, h: AADHAAR.h });
+    }
+    state.adUrl = canvas.toDataURL('image/jpeg', 0.92);
+  }
+
+  function printSheet(dataUrl, title) {
+    if (!dataUrl) { if (window.toast) toast('Make the sheet first', true); return; }
+    const html = '<!doctype html><html><head><meta charset="utf-8"><style>'
+      + '@page { size: A4; margin: 0; } body { margin: 0; } img { width: 210mm; height: 297mm; display: block; }'
+      + '</style></head><body><img src="' + dataUrl + '"></body></html>';
+    if (window.AndroidBridge && window.AndroidBridge.printHtml) {
+      window.AndroidBridge.printHtml(html);
+    } else {
+      const w = window.open('', '_blank');
+      if (!w) { toast('Allow pop-ups to print', true); return; }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 400);
+    }
+    if (window.toast) toast(title || 'Sending to printer');
+  }
+
+  document.getElementById('ppFile').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    loadImage(file, (img) => { state.ppImg = img; buildPassport(); });
+  });
+  document.getElementById('adFront').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    loadImage(file, (img) => { state.adFront = img; buildAadhaar(); });
+  });
+  document.getElementById('adBack').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    loadImage(file, (img) => { state.adBack = img; buildAadhaar(); });
+  });
+  document.getElementById('ppBg').addEventListener('change', buildPassport);
+  document.getElementById('ppCount').addEventListener('change', buildPassport);
+  document.getElementById('adCount').addEventListener('change', buildAadhaar);
+  document.getElementById('ppBuild').addEventListener('click', buildPassport);
+  document.getElementById('adBuild').addEventListener('click', buildAadhaar);
+  document.getElementById('ppPrint').addEventListener('click', () => { buildPassport(); printSheet(state.ppUrl, 'Passport photo sheet ready'); });
+  document.getElementById('adPrint').addEventListener('click', () => { buildAadhaar(); printSheet(state.adUrl, 'Aadhaar sheet ready'); });
+
+  window.__buildPassport = buildPassport;
+  window.__buildAadhaar = buildAadhaar;
+})();
+</script>
 </body>
 </html>
