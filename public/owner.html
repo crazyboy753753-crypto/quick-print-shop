@@ -519,8 +519,8 @@ table.list .pill { font-size: 11px; padding: 2px 8px; }
   .screen-head h1 { font-size: 19px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .bottomnav-inner { max-width: none; }
-  .canvas-wrap { margin-top: 12px; overflow: auto; background: #eef0f6; border-radius: 12px; padding: 8px; }
-  .canvas-wrap canvas { display: block; width: 100%; height: auto; background: #fff; border-radius: 6px; }
+  .canvas-wrap { margin-top: 12px; background: #eef0f6; border-radius: 12px; padding: 10px; display: flex; justify-content: center; }
+  .canvas-wrap canvas { display: block; max-height: 260px; max-width: 100%; width: auto; height: auto; background: #fff; border-radius: 6px; box-shadow: 0 2px 8px rgba(20,22,28,.08); }
   .nav-item { font-size: 10px; }
 }
 
@@ -6715,9 +6715,9 @@ checkSession();
     reader.readAsDataURL(file);
   }
 
-  /* replace the plain background behind the person with a solid colour */
+  /* replace the background behind the person with a solid colour */
   function paintBackground(img, colour) {
-    const maxSide = 1000;
+    const maxSide = 1200;
     const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
@@ -6731,29 +6731,64 @@ checkSession();
 
     const data = ctx.getImageData(0, 0, w, h);
     const px = data.data;
-    const target = colour === 'blue' ? [66, 133, 244] : colour === 'grey' ? [226, 230, 236] : [255, 255, 255];
-    const tolerance = 60;
+    const target = colour === 'blue' ? [74, 144, 226] : colour === 'grey' ? [232, 236, 242] : [255, 255, 255];
 
-    const seen = new Uint8Array(w * h);
+    // the background colour is whatever sits along the top edge and the top corners
+    const samples = [];
+    for (let x = 0; x < w; x += Math.max(1, Math.round(w / 60))) {
+      samples.push([px[(0 * w + x) * 4], px[(0 * w + x) * 4 + 1], px[(0 * w + x) * 4 + 2]]);
+    }
+    for (let y = 0; y < Math.round(h * 0.45); y += Math.max(1, Math.round(h / 60))) {
+      samples.push([px[(y * w + 0) * 4], px[(y * w + 0) * 4 + 1], px[(y * w + 0) * 4 + 2]]);
+      samples.push([px[(y * w + (w - 1)) * 4], px[(y * w + (w - 1)) * 4 + 1], px[(y * w + (w - 1)) * 4 + 2]]);
+    }
+    const avg = samples.reduce((a, c) => [a[0] + c[0], a[1] + c[1], a[2] + c[2]], [0, 0, 0]).map((v) => v / samples.length);
+
+    const tolerance = 78;
+    const close = (p) => {
+      const dr = px[p] - avg[0], dg = px[p + 1] - avg[1], db = px[p + 2] - avg[2];
+      return Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
+    };
+
+    // flood fill from every border pixel that looks like background
+    const mask = new Uint8Array(w * h);
     const queue = [];
-    const push = (x, y) => {
-      if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const seed = (x, y) => {
       const i = y * w + x;
-      if (seen[i]) return;
-      seen[i] = 1;
+      if (mask[i]) return;
+      if (!close(i * 4)) return;
+      mask[i] = 1;
       queue.push(i);
     };
-    push(0, 0); push(w - 1, 0); push(0, h - 1); push(w - 1, h - 1);
+    for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+    for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
 
     while (queue.length) {
       const i = queue.pop();
+      const x = i % w, y = (i - x) / w;
+      if (x > 0) { const j = i - 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+      if (x < w - 1) { const j = i + 1; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+      if (y > 0) { const j = i - w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+      if (y < h - 1) { const j = i + w; if (!mask[j] && close(j * 4)) { mask[j] = 1; queue.push(j); } }
+    }
+
+    // one pixel of feather so no white rim is left behind
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          if (mask[i]) continue;
+          if (mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w]) {
+            if (close(i * 4)) mask[i] = 1;
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i]) continue;
       const p = i * 4;
-      const r = px[p], g = px[p + 1], b = px[p + 2];
-      const isBackground = r > 255 - tolerance && g > 255 - tolerance && b > 255 - tolerance;
-      if (!isBackground) continue;
       px[p] = target[0]; px[p + 1] = target[1]; px[p + 2] = target[2]; px[p + 3] = 255;
-      const x = i % w, y = Math.floor(i / w);
-      push(x + 1, y); push(x - 1, y); push(x, y + 1); push(x, y - 1);
     }
     ctx.putImageData(data, 0, 0);
     return canvas;
